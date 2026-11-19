@@ -9,6 +9,7 @@ import subprocess
 
 
 FIELDS = (
+    ("index", "gpu_index"),
     ("pci.bus_id", "pci_bus_id"),
     ("name", "name"),
     ("driver_version", "driver_version"),

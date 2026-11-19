@@ -23,6 +23,9 @@ Example output (illustrative readings):
 CMP 170HX - card check
 =====================
 
+PCIe address: 0000:05:00.0
+NVIDIA GPU index: 0
+
 Memory grade: B
 Compute grade: B
 NVLink grade: A
@@ -43,13 +46,26 @@ Stability was not tested.
 
 Memory, compute, and NVLink grades run from A (highest) to E; PCIe uses A/B,
 and auxiliary features use A/B/E. Capacity thresholds, raw binning counts,
-identifiers, and modification details are omitted from the report. Missing,
+permanent identifiers, and modification details are omitted from the report. Missing,
 invalid, or unsupported data yields an unavailable grade rather than a guess.
 A grade does not guarantee usable capacity, performance, or stability.
 Each category is graded independently, so missing data in one category does not
 hide the others. PCIe grades describe configuration flags rather than measured
 link speed. The auxiliary category is a shared experimental indicator associated
 with MIG/ECC/NVDEC, rather than separate validation of each feature.
+
+With multiple cards, use the PCIe address and NVIDIA GPU index printed above
+each card's grades. The report's card number is only its position in the scan;
+the NVIDIA index comes from the driver and can differ. Match them on the host:
+
+```sh
+nvidia-smi --query-gpu=index,pci.bus_id,name --format=csv
+```
+
+Locations and indexes describe the system at collection time and can change
+after moving cards or reconfiguring the system. Older captures may lack an index;
+the PCIe address is still displayed when present. Full UUIDs and fingerprints
+remain hidden.
 
 The reader performs register reads only. Temporary collection and build files
 are private and removed on exit; the command saves no raw card dumps or plans.

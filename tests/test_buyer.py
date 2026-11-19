@@ -34,12 +34,23 @@ class TestBuyerReport(unittest.TestCase):
                          bdf="0000:05:00.0")
         text = format_summary(self.dump)
         for expected in ("Memory grade: B",
-                         "Power-on hours: unavailable", "Stability was not tested"):
+                         "Power-on hours: unavailable", "Stability was not tested",
+                         "PCIe address: 0000:05:00.0"):
             self.assertIn(expected, text)
-        for private in ("GPU-private", "private-hash", "0000:05:00.0",
+        for private in ("GPU-private", "private-hash",
                         "0x", "fbp_disable", "FF rows", "burn",
                         "64", "80", "96", "112", "SMs", "potential", "unlock"):
             self.assertNotIn(private, text)
+
+    def test_missing_location_never_uses_scan_number_as_gpu_index(self):
+        text = format_summary(self.dump, card_number=2)
+        self.assertIn("card 2", text)
+        self.assertIn("PCIe address: unavailable", text)
+        self.assertNotIn("NVIDIA GPU index:", text)
+        self.dump["basic"] = {"pci_bus_id": "00000000:06:00.0", "gpu_index": "0"}
+        text = format_summary(self.dump, card_number=2)
+        self.assertIn("PCIe address: 0000:06:00.0", text)
+        self.assertIn("NVIDIA GPU index: 0", text)
 
     def test_missing_defects_do_not_imply_a_perfect_bin(self):
         words = self.dump["option_words"]
@@ -245,10 +256,15 @@ class TestBuyerReport(unittest.TestCase):
                 with open(os.path.join(directory, "probe_%s.txt" % bdf), "w") as f:
                     f.write("FFPROBE fbp_disable.status fa820488 00000852\n")
             with open(os.path.join(directory, "basic.json"), "w") as f:
-                json.dump({"gpu-def": {"temperature_c": "55"},
-                           "gpu-abc": {"temperature_c": "42"}}, f)
+                json.dump({"gpu-def": {"temperature_c": "55", "gpu_index": "0"},
+                           "gpu-abc": {"temperature_c": "42", "gpu_index": "1"}}, f)
             dumps = list(ingest.read_collected(directory))
             self.assertEqual([d["basic"]["temperature_c"] for d in dumps], ["42", "55"])
+            first, second = (format_summary(d, card_number=i) for i, d in enumerate(dumps, 1))
+            self.assertIn("PCIe address: 0000:05:00.0", first)
+            self.assertIn("NVIDIA GPU index: 1", first)
+            self.assertIn("PCIe address: 0000:06:00.0", second)
+            self.assertIn("NVIDIA GPU index: 0", second)
             path = ingest.save_dump(os.path.join(directory, "cards"), dumps[0])
             self.assertEqual(load_dump(path)["basic"]["temperature_c"], "42")
 
@@ -262,6 +278,8 @@ class TestDriverData(unittest.TestCase):
     def test_unsupported_field_does_not_hide_other_fields_or_mix_gpus(self):
         def query(command, **kwargs):
             field = command[1].split(",", 1)[1]
+            if field == "index":
+                return mock.Mock(returncode=0, stdout="GPU-B, 0\nGPU-A, 1\n")
             if field == "power.draw":
                 return mock.Mock(returncode=1, stdout="")
             if field == "temperature.gpu":
@@ -272,6 +290,8 @@ class TestDriverData(unittest.TestCase):
         self.assertEqual(cards["gpu-a"]["name"], "NVIDIA, model")
         self.assertEqual(cards["gpu-a"]["temperature_c"], "42")
         self.assertEqual(cards["gpu-b"]["temperature_c"], "55")
+        self.assertEqual(cards["gpu-a"]["gpu_index"], "1")
+        self.assertEqual(cards["gpu-b"]["gpu_index"], "0")
         self.assertNotIn("power_draw_w", cards["gpu-a"])
 
     def test_missing_driver_and_timeout_are_optional(self):

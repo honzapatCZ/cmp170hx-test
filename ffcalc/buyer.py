@@ -1,5 +1,6 @@
-"""Shareable card check. Raw binning figures and identifiers stay internal."""
+"""Shareable card check. Raw binning figures and permanent IDs stay internal."""
 import math
+import re
 
 from .optionmap import SM_PER_TPC, TOTAL_FBP, TOTAL_GPC, TPC_PER_GPC, popcount
 
@@ -115,6 +116,16 @@ def _text(value):
                             for c in value).split())[:80]
 
 
+def _pci_address(value):
+    if not isinstance(value, str):
+        return None
+    address = value.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{4,8}:[0-9a-f]{2}:[01][0-9a-f]\.[0-7]", address):
+        return None
+    domain, location = address.split(":", 1)
+    return "%04x:%s" % (int(domain, 16), location)
+
+
 def format_summary(dump, card_number=None):
     grades = _grades(dump)
     basic = dump.get("basic")
@@ -124,6 +135,12 @@ def format_summary(dump, card_number=None):
     if card_number is not None:
         title += " (card %d)" % card_number
     lines = [title, "=" * len(title), ""]
+    address = _pci_address(dump.get("bdf")) or _pci_address(basic.get("pci_bus_id"))
+    lines.append("PCIe address: %s" % (address or "unavailable"))
+    index = basic.get("gpu_index")
+    if index is not None and re.fullmatch(r"[0-9]+", str(index)):
+        lines.append("NVIDIA GPU index: %d" % int(index))
+    lines.append("")
     for label, (grade, _) in grades:
         suffix = " (experimental)" if label == "Auxiliary features" and grade != "Unavailable" else ""
         lines.append("%s grade: %s%s" % (label, grade, suffix))
