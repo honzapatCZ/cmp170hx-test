@@ -1,31 +1,11 @@
 #!/usr/bin/env python3
-"""Capture option words (and optionally raw fuse rows) from a live CMP 170HX.
-
-The word capture is strictly read-only: pure reads against BAR0 via
-/sys/.../resource0. Address table is vendored at
-ffcalc/data/ga100-fuses.json.
-
---read-ff-rows additionally captures all 512 physical rows through the
-fuse macro's CMD_READ mechanism (ffcalc/ffmacro.py, procedure from
-kate-land/ga100vfi). CMD_READ is a command WRITE (FUSEADDR + FUSECTRL),
-so run it on an idle card; it is skipped on a bare capture. If you read
-the rows with another setup instead, pass the file with --ffrows. Without
-FF records in the dump, ffcalc refuses to emit or verify a burn plan (see
-ffcalc mergeff).
-
-Run on the card's host as root:
-    python3 -m ffcalc.capture --bdf 0000:05:00.0 --sku 8gb \
-        --read-ff-rows -o dump.json
-"""
-import argparse
+"""Legacy BAR helpers. The raw-capture command is disabled in this build."""
 import io
-import json
 import mmap
 import os
 import struct
 import sys
 
-from . import ffmacro, ffrows
 
 BAR0_LEN = 0x1000000
 
@@ -74,73 +54,9 @@ def wr(mm, addr, value):
     mm.write(struct.pack("<I", value & 0xffffffff))
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--bdf")
-    ap.add_argument("--map", default=DEFAULT_MAP)
-    ap.add_argument("--sku", default="8gb", choices=("8gb", "10gb"))
-    ap.add_argument("-o", "--out", default="dump.json")
-    ap.add_argument("--ffrows", metavar="FILE",
-                    help="FF rows file read out elsewhere; merged into the "
-                         "dump (see also --read-ff-rows)")
-    ap.add_argument("--read-ff-rows", action="store_true",
-                    help="capture all 512 physical rows via fuse macro "
-                         "CMD_READ (writes FUSEADDR/FUSECTRL; idle card "
-                         "only)")
-    args = ap.parse_args()
-
-    with io.open(args.map, encoding="utf-8") as f:
-        m = json.load(f)
-
-    bdf, mm = open_bar0(args.bdf)
-    words = {}
-    for key, loc in m["fields"].items():
-        fused = rd(mm, loc["fused"]) if loc.get("fused") else None
-        status = rd(mm, loc["status"]) if loc.get("status") else None
-        cur = status if status is not None else fused
-        words[key] = "0x%x" % cur
-        if fused is not None and status is not None and fused != status:
-            words[key + "__fused"] = "0x%x" % fused
-
-    for key, spec in m["bit_fields"].items():
-        w = rd(mm, spec["reg"])
-        words[key] = "0x%x" % ((w >> spec["bit"]) & 1)
-
-    for key, addr in m["defective"].items():
-        words[key] = "0x%x" % rd(mm, addr)
-
-    info = {}
-    for name, addr in m["info"].items():
-        info[name] = "0x%x" % rd(mm, addr)
-
-    ff_rows = {}
-    if args.ffrows:
-        try:
-            rows = ffrows.parse_file(args.ffrows)
-        except ValueError as e:
-            raise SystemExit("bad FF rows file %s: %s" % (args.ffrows, e))
-        ff_rows.update((r, v) for r, v in rows.items())
-    wrote_rows = bool(args.read_ff_rows)
-    if args.read_ff_rows:
-        try:
-            ffmacro.capture_rows(lambda a: rd(mm, a),
-                                 lambda a, v: wr(mm, a, v), rows=ff_rows)
-        except ffmacro.FuseControllerError as e:
-            print("WARN: CMD_READ pass aborted: %s" % e)
-            print("WARN: keeping the %d row(s) read so far" % len(ff_rows))
-    dump = {"sku": args.sku, "bdf": bdf,
-            "ff_rows": dict(("%d" % r, "0x%08x" % v)
-                           for r, v in sorted(ff_rows.items())),
-            "option_words": words, "info": info,
-            "read_only": not wrote_rows}
-    with io.open(args.out, "w", encoding="utf-8") as f:
-        json.dump(dump, f, indent=2, sort_keys=True)
-    state, missing = ffrows.coverage(dump)
-    if state != "complete":
-        print("note: FF rows %s (%d of %d unknown); ffcalc will not emit a "
-              "burn plan until a full readout is merged (ffcalc mergeff)"
-              % (state, len(missing), ffrows.N_FF_ROWS))
-    print("wrote %s (%s)" % (args.out, bdf))
+def main(argv=None):
+    print("This build only supports card checks. Run scripts/ffscan.sh.", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":

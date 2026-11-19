@@ -25,7 +25,7 @@ def load_dump(path):
         words[k] = _h(v)
     out = {"sku": sku, "ff_rows": rows, "option_words": words,
            "source": path}
-    for extra in ("uuid", "fingerprint", "bdf", "info"):
+    for extra in ("uuid", "fingerprint", "bdf", "info", "basic"):
         if extra in raw:
             out[extra] = raw[extra]
     return out

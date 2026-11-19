@@ -173,54 +173,6 @@ class TestFfRowsParsing(unittest.TestCase):
         self.assertEqual(ffrows.coverage({"ff_rows": full})[0], "complete")
 
 
-class TestMergeffCli(unittest.TestCase):
-    def setUp(self):
-        self.dump = load_dump(SAMPLE)
-        self.tmp = tempfile.mkdtemp(prefix="ffcalc-merge-")
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.card = os.path.join(self.tmp, "card.json")
-        with open(self.card, "w") as f:
-            json.dump({"sku": "8gb", "ff_rows": {}}, f)
-        self.rows = write_rows_file(self.dump,
-                                    os.path.join(self.tmp, "rows.txt"))
-
-    def test_gen_refused_then_available(self):
-        out = os.path.join(self.tmp, "plan.json")
-        rc = cli.main(["gen", self.card, "-o", out])
-        self.assertEqual(rc, 2)
-        self.assertFalse(os.path.exists(out))
-        self.assertEqual(cli.main(["mergeff", self.card, self.rows]), 0)
-        rc = cli.main(["gen", self.card, "-o", out])
-        self.assertEqual(rc, 0)
-        with open(out) as f:
-            obj = json.load(f)
-        self.assertTrue(all(r["row"] >= 240 for r in obj["burn"]))
-
-    def test_mergeff_partial_still_refused(self):
-        partial = os.path.join(self.tmp, "partial.txt")
-        with open(partial, "w") as f:
-            for r, v in sorted(self.dump["ff_rows"].items()):
-                if r != 486:
-                    f.write("%s %s\n" % (r, v))
-        rc = cli.main(["mergeff", self.card, partial])
-        self.assertEqual(rc, 1)
-        rc = cli.main(["gen", self.card, "-o",
-                       os.path.join(self.tmp, "plan.json")])
-        self.assertEqual(rc, 2)
-
-    def test_sim_with_ffrows_option(self):
-        self.assertEqual(cli.main(["mergeff", self.card, self.rows]), 0)
-        plan_path = os.path.join(self.tmp, "plan.json")
-        cli.main(["gen", self.card, "-o", plan_path])
-        empty = os.path.join(self.tmp, "empty.json")
-        with open(empty, "w") as f:
-            json.dump({"sku": "8gb", "ff_rows": {}}, f)
-        rc = cli.main(["sim", empty, plan_path])
-        self.assertEqual(rc, 1)
-        rc = cli.main(["sim", empty, plan_path, "--ffrows", self.rows])
-        self.assertEqual(rc, 0)
-
-
 class TestUuidMismatch(unittest.TestCase):
     def setUp(self):
         self.dump = load_dump(SAMPLE)
@@ -393,79 +345,39 @@ class TestIngest(unittest.TestCase):
         self.assertEqual(dump["ff_rows"][222], 0x0fe805c1)
         self.assertFalse(dump["read_only"])
 
-    def test_scan_with_cmd_read_log_yields_plans(self):
-        out = tempfile.mkdtemp(prefix="ffcalc-out-")
-        self.addCleanup(shutil.rmtree, out, True)
+    def test_scan_is_an_opaque_report_even_with_full_rows(self):
+        import contextlib
+        import io
         d = self._collect_dir()
-        for _bdf, _uuid in UUIDS.values():
-            path = os.path.join(
-                d, "probe_%s.txt" % ingest.sanitize(_bdf))
+        for bdf, _uuid in UUIDS.values():
+            path = os.path.join(d, "probe_%s.txt" % ingest.sanitize(bdf))
             with open(path, "a") as f:
                 f.write("\n" + "\n".join(self._ffrow_lines()))
-        self.assertEqual(
-            cli.main(["scan", "--dir", d,
-                      "--outdir", os.path.join(out, "cards"),
-                      "--plans", os.path.join(out, "plans")]), 0)
-        for _bdf, uuid in UUIDS.values():
-            with open(os.path.join(out, "plans",
-                                   uuid[4:] + ".burn.json")) as f:
-                obj = json.load(f)
-            self.assertEqual(obj["uuid"], uuid)
-            # row 222 is occupied by the captured record
-            self.assertTrue(all(r["row"] >= 223 for r in obj["burn"]))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["scan", "--dir", d]), 0)
+        report = output.getvalue()
+        self.assertEqual(report.count("Memory grade: B"), 2)
+        self.assertEqual(report.count("Memory grade: C"), 1)
+        self.assertEqual(report.count("Compute grade: A"), 2)
+        self.assertEqual(report.count("Compute grade: C"), 1)
+        for hidden in ("GiB", "SMs", "0x", "fingerprint", "burn", "GPU-", "potential"):
+            self.assertNotIn(hidden, report)
 
-    def _scan(self, out):
-        return cli.main(["scan", "--dir", self._collect_dir(),
-                         "--outdir", os.path.join(out, "cards"),
-                         "--plans", os.path.join(out, "plans")])
-
-    def _merge_rows(self, out):
-        rows = write_rows_file(load_dump(SAMPLE),
-                               os.path.join(out, "rows.txt"))
-        for _bdf, uuid in UUIDS.values():
-            rc = cli.main(["mergeff",
-                           os.path.join(out, "cards", uuid[4:] + ".json"),
-                           rows])
-            self.assertEqual(rc, 0)
-        return rows
-
-    def test_scan_cli_refuses_plans_without_ff_rows_then_ok(self):
-        out = tempfile.mkdtemp(prefix="ffcalc-out-")
-        self.addCleanup(shutil.rmtree, out, True)
-        # read-only probe cannot see FF rows -> dumps saved, plans refused
-        self.assertEqual(self._scan(out), 1)
-        plans = os.path.join(out, "plans")
-        self.assertFalse(os.path.isdir(plans))
-        for _bdf, uuid in UUIDS.values():
-            self.assertTrue(os.path.exists(
-                os.path.join(out, "cards", uuid[4:] + ".json")))
-        # after merging a full FF readout, a rescan yields the plans
-        self._merge_rows(out)
-        self.assertEqual(self._scan(out), 0)
-        for _bdf, uuid in UUIDS.values():
-            with open(os.path.join(plans, uuid[4:] + ".burn.json")) as f:
-                self.assertEqual(json.load(f)["uuid"], uuid)
-
-    def test_verify_cli_ok_and_mismatch(self):
-        out = tempfile.mkdtemp(prefix="ffcalc-out-")
-        self.addCleanup(shutil.rmtree, out, True)
-        self._scan(out)
-        rows = self._merge_rows(out)
-        self._scan(out)
-        plan5 = os.path.join(out, "plans",
-                             UUIDS[0xfa000000][1][4:] + ".burn.json")
-        rc = cli.main(["verify", plan5, "--dir", self._collect_dir(),
-                       "--ffrows", rows])
-        self.assertEqual(rc, 0)
-        # fresh read without the FF rows file -> replay cannot be trusted
-        rc = cli.main(["verify", plan5, "--dir", self._collect_dir()])
-        self.assertEqual(rc, 1)
-        wrong = {bar: (bdf, "GPU-" + "f" * 32)
-                 for bar, (bdf, _u) in UUIDS.items()}
-        rc = cli.main(["verify", plan5,
-                       "--dir", self._collect_dir(wrong),
-                       "--ffrows", rows])
-        self.assertEqual(rc, 1)
+    def test_scan_without_rows_succeeds_without_changing_collection(self):
+        import contextlib
+        import io
+        d = self._collect_dir()
+        before = {}
+        for name in os.listdir(d):
+            with open(os.path.join(d, name), "rb") as f:
+                before[name] = f.read()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["scan", "--dir", d]), 0)
+        self.assertEqual(set(os.listdir(d)), set(before))
+        for name, content in before.items():
+            with open(os.path.join(d, name), "rb") as f:
+                self.assertEqual(f.read(), content)
 
 
 if __name__ == "__main__":

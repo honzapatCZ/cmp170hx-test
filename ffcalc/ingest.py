@@ -103,6 +103,17 @@ def build_dump(m, entries, sku="8gb", bdf=None, uuid=None, source=None):
 def read_collected(dirpath, m=None, sku="8gb"):
     """Yield dumps for every GPU row in collected/bar0map.tsv."""
     m = m or load_map()
+    basic_path = os.path.join(dirpath, "basic.json")
+    basic = {}
+    if os.path.exists(basic_path):
+        try:
+            with io.open(basic_path, encoding="utf-8") as f:
+                saved_basic = json.load(f)
+            if isinstance(saved_basic, dict):
+                basic = dict((k.lower(), v) for k, v in saved_basic.items()
+                             if isinstance(v, dict))
+        except (OSError, ValueError):
+            pass  # Optional driver data must not block the card analysis.
     path = os.path.join(dirpath, "bar0map.tsv")
     with io.open(path, encoding="utf-8") as f:
         for line in f:
@@ -118,6 +129,8 @@ def read_collected(dirpath, m=None, sku="8gb"):
                 entries = parse_log(lf.read())
             dump = build_dump(m, entries, sku=sku, bdf=bdf, uuid=uuid,
                               source="ffprobe.ko@%s" % bar0)
+            if uuid and uuid.lower() in basic:
+                dump["basic"] = basic[uuid.lower()]
             yield dump
 
 

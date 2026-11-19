@@ -1,30 +1,10 @@
 #!/usr/bin/env python3
-"""Execute a verified ffcalc burn plan on a live CMP 170HX.
-
-    python3 -m ffcalc.burntool status --bdf 0000:05:00.0
-    python3 -m ffcalc.burntool burn  plans/<uuid>.burn.json \
-        --dump cards/<uuid>.json --bdf 0000:05:00.0 [--rows 315] [--yes]
-
-burn refuses to touch the card unless:
-  1. simulate() on the plan against the card dump is error-free (row
-     occupancy, old values, re-encode, FF range all check out);
-  2. the fuse controller sits in the write window (idle, FUSEDEBUG=0,
-     CRC=0x55, EFP=1, DSOV=0) -- checked again after CMD_SENSE;
-  3. every target row still reads blank (0x00000000) at burn time -- or
-     already holds exactly its planned record (interrupted run: that row is
-     skipped, re-running the same plan is safe).
-Each record is programmed one at a time and read back; a poisoned
-controller (FUSECTRL=0xBADFxxxx) aborts the whole run and you must
-cold-boot before any further access. See docs/BURNING.md.
-"""
-import argparse
-import functools
+"""Legacy library routines. The programming command is disabled in this build."""
 import io
 import json
 import sys
 
 from . import ffmacro
-from .capture import open_bar0, rd as _rd, wr as _wr
 from .dump import load_dump
 from .simulate import simulate
 
@@ -136,34 +116,8 @@ def cmd_burn(rd, wr, plan_path, dump_path, rows=None, log=print,
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="python -m ffcalc.burntool")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    sp = sub.add_parser("status")
-    sp.add_argument("--bdf")
-    bp = sub.add_parser("burn")
-    bp.add_argument("plan")
-    bp.add_argument("--dump", required=True)
-    bp.add_argument("--bdf")
-    bp.add_argument("--rows", help="subset, e.g. '315' for a first test row")
-    bp.add_argument("--force", action="store_true",
-                    help="skip live-snapshot re-match (NOT recommended)")
-    bp.add_argument("--yes", action="store_true")
-    args = ap.parse_args(argv)
-
-    bdf, mm = open_bar0(args.bdf)
-    r = functools.partial(_rd, mm)
-    w = functools.partial(_wr, mm)
-    print("card at %s" % bdf)
-    if args.cmd == "status":
-        return cmd_status(r)
-    if not args.yes:
-        ans = input("burn %s onto %s? type YES to continue: "
-                    % (args.plan, bdf))
-        if ans.strip() != "YES":
-            print("aborted")
-            return 2
-    return cmd_burn(r, w, args.plan, args.dump, rows=args.rows,
-                    force=args.force)
+    print("This build only supports card checks. Run scripts/ffscan.sh.", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
